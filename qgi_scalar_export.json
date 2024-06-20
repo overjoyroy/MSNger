@@ -1,0 +1,23 @@
+{
+  "name": "dsistudio_pipeline",
+  "space": "T1w",
+  "anatomical": ["mrtrix_5tt_fast"],
+  "atlases": ["aal116"],
+  "nodes": [
+    {
+      "name": "dsistudio_gqi",
+      "software": "DSI Studio",
+      "action": "reconstruction",
+      "input": "qsiprep",
+      "output_suffix": "gqi",
+      "parameters": {"method": "gqi"}
+    },
+    {
+      "name": "scalar_export",
+      "software": "DSI Studio",
+      "action": "export",
+      "input": "dsistudio_gqi",
+      "output_suffix": "gqiscalar"
+    }
+  ]
+}

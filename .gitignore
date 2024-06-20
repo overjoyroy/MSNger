@@ -1,0 +1,5 @@
+# No Macbook Finder files
+.DS_Store
+
+# No freesurfer license files
+license.txt
