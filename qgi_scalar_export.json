@@ -1,7 +1,7 @@
 {
-  "name": "dsistudio_pipeline",
+  "name": "dsistudio_pipeline_export_scalars",
   "space": "T1w",
-  "anatomical": ["mrtrix_5tt_fast"],
+  "anatomical": [],
   "atlases": ["aal116"],
   "nodes": [
     {
