@@ -1,5 +1,9 @@
 # No Macbook Finder files
 .DS_Store
+.ipynb_checkpoints/
 
 # No freesurfer license files
 license.txt
+
+workingdir/
+testResults/
