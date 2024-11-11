@@ -9,6 +9,7 @@ import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 import numpy as np
 import os, sys
+import re
 import shutil
 from pathlib import Path
 import time
@@ -71,7 +72,7 @@ def vet_inputs(args):
     if args.segment:
         args.segment = [os.path.abspath(os.path.expanduser(args.segment[0]))]
     else:
-        args.template = ['/app/Template/aal2.nii.gz']
+        args.segment = ['/app/Template/aal2.nii.gz']
     
     # Validate subject ID
     if not args.subject_id or not isinstance(args.subject_id[0], str):
@@ -96,7 +97,7 @@ def vetArgNone(variable, default):
     else:
         return os.path.abspath(os.path.expanduser(variable[0]))
 
-def makeOutDir(outDirName, args, ):
+def makeOutDir(outDirName, args):
 
     outDirPath_parents = args.outDir[0]
     if '~' in outDirPath_parents:
@@ -104,11 +105,11 @@ def makeOutDir(outDirName, args, ):
 
     outDirPath_parents = os.path.abspath(outDirPath_parents)
 
-    templateName =  os.path.basename(args.template[0]).split('.')[0] #/path/to/aal.nii.gz
-    print('Template name appears to be: {}. This will be the name of the output subdirectory'.format(templateName))
+    segmentName =  os.path.basename(args.segment[0]).split('.')[0] #/path/to/aal.nii.gz
+    print('Atlas name appears to be: {}. This will be the name of the output subdirectory'.format(segmentName))
 
 
-    outDir = os.path.join(outDirPath_parents, outDirName, args.subject_id[0], templateName)
+    outDir = os.path.join(outDirPath_parents, outDirName, args.subject_id[0], segmentName)
 
     if not os.path.exists(outDir):
         os.makedirs(outDir, exist_ok=True)
@@ -139,20 +140,179 @@ def copy_modality_outputs(modality_path, out_dir, keywords=None):
     return 0
 
 def copyModalityOutputsToForgery(args, outDir):
-    outdirPath = Path(outDir)
-    basepath = outdirPath.parents[2]
+    outDirPath = Path(outDir)
+    basepath = outDirPath.parents[2]
 
     print('Copying T1 outputs...')
     t1Path = os.path.join(basepath, 'RadT1cal_Features', args.subject_id[0])
+    copy_modality_outputs(t1Path, outDir, ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv'])
+
     print('Copying BOLD outputs...')
     boldPath = os.path.join(basepath, 'Sim_Funky_Pipeline', args.subject_id[0])
+    copy_modality_outputs(boldPath, outDir, ['average_arr.csv', 'sim_matrix.csv'])
+
     print('Copying DTI outputs...')
     dtiPath = os.path.join(basepath, 'qsirecon', args.subject_id[0])
-
-    copy_modality_outputs(t1Path, outDir, ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv'])
-    copy_modality_outputs(boldPath, outDir, ['average_arr.csv', 'sim_matrix.csv'])
     copy_modality_outputs(dtiPath, outDir, ['_gqiscalar.nii.gz'])
 
+
+def registerAtlasToMap(args, outDir, diffusionMapPath):
+    
+    # register MNI first
+    antsReg = ants.Registration()
+    antsReg.inputs.transforms = ['Affine', 'SyN']
+    antsReg.inputs.transform_parameters = [(2.0,), (0.25, 3.0, 0.0)]
+    antsReg.inputs.number_of_iterations = [[1500, 200], [100, 50, 30]]
+    if args.testmode==True:
+        antsReg.inputs.number_of_iterations = [[5, 5], [5, 5, 5]]
+    antsReg.inputs.dimension = 3
+    antsReg.inputs.write_composite_transform = False
+    antsReg.inputs.collapse_output_transforms = False
+    antsReg.inputs.initialize_transforms_per_stage = False
+    antsReg.inputs.metric = ['Mattes']*2
+    antsReg.inputs.metric_weight = [1]*2 # Default (value ignored currently by ANTs)
+    antsReg.inputs.radius_or_number_of_bins = [32]*2
+    antsReg.inputs.sampling_strategy = ['Random', None]
+    antsReg.inputs.sampling_percentage = [0.05, None]
+    antsReg.inputs.convergence_threshold = [1.e-8, 1.e-9]
+    antsReg.inputs.convergence_window_size = [20]*2
+    antsReg.inputs.smoothing_sigmas = [[1,0], [2,1,0]]
+    antsReg.inputs.sigma_units = ['vox'] * 2
+    antsReg.inputs.shrink_factors = [[2,1], [3,2,1]]
+    antsReg.inputs.use_histogram_matching = [True, True] # This is the default
+    antsReg.inputs.output_warped_image = os.path.join(outDir, 'output_warped_image.nii.gz')
+    antsReg.inputs.output_transform_prefix = os.path.join(outDir, 'transform_')
+
+    antsReg.inputs.moving_image = args.template[0]
+    antsReg.inputs.fixed_image  = diffusionMapPath
+    antsReg_out = antsReg.run()
+    
+    # apply transform to atlas
+    antsAppTrfm = ants.ApplyTransforms()
+    antsAppTrfm.inputs.dimension = 3
+    antsAppTrfm.inputs.interpolation = 'NearestNeighbor'
+    antsAppTrfm.inputs.default_value = 0
+
+    antsAppTrfm.inputs.input_image = args.segment[0]
+    antsAppTrfm.inputs.reference_image = diffusionMapPath
+    antsAppTrfm.inputs.transforms = antsReg_out.outputs.reverse_forward_transforms
+    antsAppTrfm.inputs.invert_transform_flags = antsReg_out.outputs.reverse_forward_invert_flags
+    antsAppTrfm.inputs.output_image = os.path.join(outDir, 'atlasregisteredToDiffMap.nii.gz')
+
+    applyout = antsAppTrfm.run()
+    regsiteredAtlas = applyout.outputs.output_image
+    print('The registered atlas was generated ans saved here:{}'.format(regsiteredAtlas))
+    return regsiteredAtlas
+
+def make_average_arr(diffusionMapPath, atlas_path):
+    diffusionMap = nib.load(diffusionMapPath)
+    atlas = nib.load(atlas_path)
+    diffusionMap_array = diffusionMap.get_fdata()
+    atlas_array = atlas.get_fdata() 
+
+    uniq_structure_indices = np.unique(atlas_array)
+    maxSegVal = max(uniq_structure_indices)
+
+    # Prepare an empty list to hold the results
+    results = []
+
+    # Iterate through all unique structure indices (starting from 1 since 0 is null)
+    for s in range(1, int(maxSegVal) + 1):
+        if s not in uniq_structure_indices:
+            results.append([s, 0.0])  # For missing structures, store 0.0
+            continue
+
+        atlas_indices = atlas_array == s
+        matrix = diffusionMap_array[atlas_indices]
+        avg_value = np.average(matrix)
+        results.append([s, avg_value])
+
+    results_array = np.array(results)
+
+    return results_array
+
+# Handy function
+def getNiftiExtension(filepath):
+    nifti = '.nii'
+    niftigz = '.nii.gz'
+    if filepath[-7:] == niftigz:
+        return niftigz
+    elif filepath[-4:] == nifti:
+        return nifti
+    else:
+        raise ValueError(f"The given file is not a nifti! File given was {filepath}")
+
+# This can be helpful in improving registration
+def center_image_at_origin(image_path, outDir, coordinates=None):
+
+    centered_filename = os.path.basename(image_path).split('.')[0] + '_centered' + getNiftiExtension(image_path)
+    centered_path = os.path.join(outDir, centered_filename)
+
+    # Center of gravity in mm
+    if coordinates is None:
+        fslstats_cogmm = fsl.ImageStats(in_file=image_path, op_string= '-c')
+        cog_output = fslstats_cogmm.run()
+        cog_coords = np.array(cog_output.outputs.out_stat)
+    else:
+        if not isinstance(coordinates, (list, np.ndarray)) or len(coordinates) != 3:
+            raise ValueError("Coordinates must be a list or array with exactly three items.")
+        cog_coords = coordinates
+    
+    image = nib.load(image_path)
+    affine = image.affine
+
+    translation_vector = -cog_coords
+    translation_matrix = np.eye(4)
+    translation_matrix[:3, 3] = translation_vector
+    new_affine = np.dot(translation_matrix, affine)
+
+    new_image = nib.Nifti1Image(image.get_fdata(), new_affine)
+    nib.save(new_image, centered_path)
+    print(f"Image was recentered with CoG(mm) at the origin. Saved to {centered_path}")
+    return centered_path, cog_coords
+
+# very specific to diffusion maps outputted by qsiprep
+def extract_modality_suffix(filename):
+    # Regular expression to capture either "dti_fa" or "ad" (before _gqiscalar)
+    pattern = r"sub-\d+_ses-\d+_space-[\w]+_desc-[\w]+_desc-([\w]+(?:_[\w]+)?)_gqiscalar"
+    match = re.search(pattern, filename)
+    if match:
+        return match.group(1)
+    else:
+        return None
+
+# save diffusion maps in tabular format
+def collectDiffusionMapPerROI(args, outDir):
+    fa_suffix = 'dti_fa_gqiscalar.nii.gz'
+    fa_path = None
+    for file in os.listdir(outDir):
+        if fa_suffix in file:
+            fa_path = os.path.join(outDir, file)
+
+    if fa_path == None:
+        raise ValueError("DTI FA map is not within the users outDirectory. Did \
+            you run preprocess yor DWI? If so, check the file path name and \
+            ensure it ends with {}".format(fa_suffix))
+
+    # Center and register the atlas to the FA map
+    facentered, fa_cog = center_image_at_origin(fa_path, outDir)
+    regsiteredAtlas = registerAtlasToMap(args, outDir, facentered)
+
+    # Recenter all maps based on FA center, and reuse the FA registered atlas
+    # NOTE: This logic only works assuming all diffusion maps are in the same space at the start
+    maps = [os.path.join(outDir, image) for image in os.listdir(outDir) if '_gqiscalar.nii.gz' in image]
+    averages = []
+    for image in maps:
+        modality = extract_modality_suffix(image)
+        if not '_centered.nii.gz' in image:
+            centered_image, _ = center_image_at_origin(image, outDir, fa_cog)
+        avg_array = make_average_arr(centered_image, regsiteredAtlas)
+        output_csv_path = os.path.join(outDir, f"{modality}_averages.csv")
+        print(f'Saving per ROI averages for {modality} map to {output_csv_path}')
+        np.savetxt(output_csv_path, avg_array, delimiter=',', header=f'ROI,{modality}', comments='', fmt='%d,%f')
+        averages.append(output_csv_path)
+
+    return averages
 
 
 def main():
@@ -171,19 +331,22 @@ def main():
     segment_path  = vetArgNone(args.segment, '/app/Template/aal2.nii.gz') #path in docker container
     enforceBIDS   = True
 
-    #patient specific outdir
+    #patient specific outDir
     outDir = makeOutDir(outDirName, args)
 
     if args.testmode:
         print("!!YOU ARE USING TEST MODE!!")
 
 
-    # move all stuff from T1/BOLD/DWI to new dir
+    ################################################################################
+    ### WORK WORK
+    ################################################################################
+
+    # Move all stuff from T1/BOLD/DWI to new dir
     copyModalityOutputsToForgery(args, outDir)
 
-    # register aal2 to dwi (only 1)
-
-    # get ROI avg values for aal2 for all dti maps, save for csv
+    # register atlas to diffusion maps and get ROI averages
+    averages = collectDiffusionMapPerROI(args, outDir)
 
     # combine all csvs into one table
 
@@ -191,9 +354,9 @@ def main():
 
     # make a default file optinos (set 'custom' if you want to give your own file)
 
-    # set similarity to pearson/spearman/cosine
+    # set similarity to pearson/euclidean/cosine
 
-    # 
+    # output name features_similarit.csv
     
 
 
