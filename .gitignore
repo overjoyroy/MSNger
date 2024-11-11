@@ -7,3 +7,10 @@ license.txt
 
 workingdir/
 testResults/
+
+# nipype bug where fslstats result saved as file
+MSNForge/stat_result.json
+
+# temporary helper function i'm using
+runRad.py
+

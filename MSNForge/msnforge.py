@@ -9,6 +9,7 @@ import nipype.interfaces.utility as util
 import nipype.pipeline.engine as pe
 import numpy as np
 import os, sys
+import pandas as pd
 import re
 import shutil
 from pathlib import Path
@@ -314,6 +315,25 @@ def collectDiffusionMapPerROI(args, outDir):
 
     return averages
 
+def consolidateFeatures(args, outDir, csv_files):
+
+    combined_df = pd.DataFrame()
+
+    for file in csv_files:
+        df = pd.read_csv(file)
+
+        if combined_df.empty:
+            combined_df = df
+        else:
+            combined_df = pd.merge(combined_df, df, on='ROI', how='outer')
+
+    out_file = 'consolidatedFeatures.csv'
+    out_path = os.path.join(outDir, out_file)
+    combined_df.to_csv(out_path, index=False)
+    print(f"Combined CSV of MSN features saved to {out_path}")
+
+    return out_path
+
 
 def main():
 
@@ -343,12 +363,21 @@ def main():
     ################################################################################
 
     # Move all stuff from T1/BOLD/DWI to new dir
-    copyModalityOutputsToForgery(args, outDir)
+    # copyModalityOutputsToForgery(args, outDir)
 
     # register atlas to diffusion maps and get ROI averages
-    averages = collectDiffusionMapPerROI(args, outDir)
+    dti_averages = collectDiffusionMapPerROI(args, outDir)
+
+    # get struct features
+    target_files = ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv']
+    struct_files = []
+    for i in os.listdir(outDir):
+        if any(target_file in i for target_file in target_files):
+            struct_files.append(os.path.join(outDir,i))
 
     # combine all csvs into one table
+    features = struct_files + dti_averages
+    consolidateFeatures(args, outDir, features)
 
     # take in fields user wants through a file
 

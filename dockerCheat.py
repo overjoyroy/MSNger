@@ -68,7 +68,7 @@ def vet_inputs(args):
     if args.segment:
         args.segment = [os.path.abspath(os.path.expanduser(args.segment[0]))]
     else:
-        args.template = ['/app/Template/aal2.nii.gz']
+        args.segment = ['/app/Template/aal2.nii.gz']
     
     # Validate subject ID
     if not args.batch_whole_dataset:
@@ -171,6 +171,7 @@ def preprocess(args):
 
 
 def batch_preprocess_whole_dataset(args):
+    print('Batch preprocessing in place!')
     for subj in tqdm(os.listdir(args.parentDir[0])):
         if 'sub-' in subj[:4]:
             args.subject_id = [subj] # set subject
@@ -180,6 +181,7 @@ def batch_preprocess_whole_dataset(args):
                     args.session_id = [sess] # set session
                     
                     if not args.preprocess_only == 'none':
+                        print('Preprocessing: {}-{}'.format(args.subject_id[0], args.session_id[0]))
                         preprocess(args)
 
             
