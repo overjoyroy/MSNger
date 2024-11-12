@@ -1,5 +1,6 @@
 #bin/python3
 import argparse
+import bct
 import nibabel as nib
 import nipy as nipy
 import nipype.interfaces.io as nio 
@@ -120,7 +121,7 @@ def makeOutDir(outDirName, args):
     return outDir
 
 
-def copy_modality_outputs(modality_path, out_dir, keywords=None):
+def copy_modality_outputs(modality_path, out_dir, keywords=None, prefix=None):
     if keywords is None:
         raise ValueError("Keywords list cannot be None. Please provide keywords to match in filenames.\n")
     
@@ -133,7 +134,10 @@ def copy_modality_outputs(modality_path, out_dir, keywords=None):
         for file in filenames:
             if any(keyword in file for keyword in keywords):
                 source = os.path.join(root, file)
-                destination = os.path.join(out_dir, file)
+                if prefix is None:
+                    destination = os.path.join(out_dir, file)
+                else:
+                    destination = os.path.join(out_dir, prefix+file)
                 shutil.copy2(source, destination)
                 print(f"Copied {file} to {destination}")
 
@@ -152,7 +156,7 @@ def copyModalityOutputsToForge(args, outDir):
 
     print('Copying BOLD outputs...')
     boldPath = os.path.join(basepath, 'Sim_Funky_Pipeline', args.subject_id[0])
-    successes['BOLD'] = copy_modality_outputs(boldPath, outDir, ['sim_matrix.csv'])
+    successes['BOLD'] = copy_modality_outputs(boldPath, outDir, ['sim_matrix.csv'], prefix='func_')
 
     print('Copying DTI outputs...')
     dtiPath = os.path.join(basepath, 'qsirecon', args.subject_id[0])
@@ -301,6 +305,7 @@ def extract_modality_suffix(filename):
 
 # save diffusion maps in tabular format
 def collectDiffusionMapPerROI(args, outDir):
+    print('\nCollecting diffusion map averages...')
     fa_suffix = 'dti_fa_gqiscalar.nii.gz'
     fa_path = None
     for file in os.listdir(outDir):
@@ -329,8 +334,55 @@ def collectDiffusionMapPerROI(args, outDir):
 
     return averages
 
+def saveNetworkProp(args, outDir, networkProp_name, networkProp_values, ROIs):
+    df = pd.DataFrame({
+        'ROI': ROIs,
+        f'{networkProp_name}': networkProp_values
+    })
+
+    # Save DataFrame to CSV
+    output_csv_path = os.path.join(outDir, f'{networkProp_name}.csv')
+    df.to_csv(output_csv_path, index=False)
+    return output_csv_path
+
+
 def calculateFuncNetworkProperties(args, outDir):
-    print("DO BOLD THINGS")
+    print('\nCalculating functional network properties...')
+    sim_matrix_file = 'func_sim_matrix.csv'
+    sim_matrix_path = os.path.join(outDir, sim_matrix_file)
+    sim_matrix = np.loadtxt(sim_matrix_path, delimiter=",") 
+
+    atlas = nib.load(args.segment[0])
+    atlas_array = atlas.get_fdata() 
+    uniq_structure_indices = np.unique(atlas_array)
+    maxSegVal = int(max(uniq_structure_indices))
+    ROIs = list(range(1, maxSegVal+1))
+
+    outfiles = []
+
+    # Define properties and functions to calculate them
+    properties = [
+        ('clustering_coefficient', lambda sm: bct.clustering_coef_wu(sm)),
+        ('node_betweeness', lambda sm: bct.betweenness_wei(sm)),
+        ('eigenvector_centrality', lambda sm: bct.eigenvector_centrality_und(sm)),
+        # ('participation_coef', lambda sm: bct.participation_coef(sm, bct.community_louvain(sm, B='negative_sym')[0])),
+        ('degree_at_abs50', lambda sm:bct.degrees_und(bct.threshold_absolute(np.abs(sm), 0.50))),
+        ('degree_at_pro50', lambda sm:bct.degrees_und(bct.threshold_proportional(np.abs(sm), 0.50))),
+        ('degree_at_abs25', lambda sm:bct.degrees_und(bct.threshold_absolute(np.abs(sm), 0.25))),
+        ('degree_at_pro25', lambda sm:bct.degrees_und(bct.threshold_proportional(np.abs(sm), 0.25))),
+    ]
+
+    # Calculate each network property and save to CSV
+    outfiles = []
+    for prop_name, func in properties:
+        networkProp_values = func(sim_matrix)
+        outfile = saveNetworkProp(args, outDir, prop_name, networkProp_values, ROIs)
+        print(f'Computing and saving {prop_name} of functional network to {outfile}')
+        outfiles.append(outfile)
+
+    return outfiles
+
+
 
 def consolidateFeatures(args, outDir, csv_files):
 
@@ -382,26 +434,30 @@ def main():
     # Move all stuff from T1/BOLD/DWI to new dir
     successes = copyModalityOutputsToForge(args, outDir)
 
-    # register atlas to diffusion maps and get ROI averages
-    if not successes['DTI'] < 0:
-        dti_averages = collectDiffusionMapPerROI(args, outDir)
-
-    # TO DO: if BOLD exists, calculate and output network stats
-    if not successes['BOLD'] < 0:
-        calculateFuncNetworkProperties(args, outDir)
-
     # get struct features
+    struct_files = []
     if not successes['T1'] < 0:
         target_files = ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv']
-        struct_files = []
         for i in os.listdir(outDir):
             if any(target_file in i for target_file in target_files):
                 struct_files.append(os.path.join(outDir,i))
 
+    # register atlas to diffusion maps and get ROI averages
+    dti_averages = []
+    if not successes['DTI'] < 0:
+        dti_averages = collectDiffusionMapPerROI(args, outDir)
+
+
+    # calculate and output network stats
+    bold_networkprops = []
+    if not successes['BOLD'] < 0:
+        bold_networkprops = calculateFuncNetworkProperties(args, outDir)
+
     # combine all csvs into one table
-    features = struct_files + dti_averages
+    features = struct_files + dti_averages + bold_networkprops
 
     consolidateFeatures(args, outDir, features)
+    # normalize all columns
 
     # # take in fields user wants through a file
 

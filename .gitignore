@@ -7,9 +7,11 @@ license.txt
 
 workingdir/
 testResults/
+__pycache__/
 
 # nipype bug where fslstats result saved as file
 MSNForge/stat_result.json
+MSNForge/__pycache__
 
 # temporary helper function i'm using
 runRad.py
