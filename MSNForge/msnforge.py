@@ -158,8 +158,32 @@ def copyModalityOutputsToForgery(args, outDir):
 
 
 def registerAtlasToMap(args, outDir, diffusionMapPath):
+
+    tempDir = os.path.join(outDir, 'registration_intermediates')
+    if not os.path.exists(tempDir):
+        os.makedirs(tempDir, exist_ok=True)
+
+    # FSL affine is better than ANTs affine imo
+    flt = fsl.FLIRT()
+    flt.inputs.in_file = args.template[0]
+    flt.inputs.reference =  diffusionMapPath
+    flt.inputs.out_file = os.path.join(tempDir, appendToBasename(args.template[0], '_flirt', True))
+    flt.inputs.out_matrix_file = os.path.join(tempDir, appendToBasename(args.template[0], '_flirt', True, '.mat'))
+    fltout = flt.run()
+
+    # apply same transformation to segment
+    applyflt = fsl.FLIRT()
+    applyflt.inputs.in_file = args.segment[0]
+    applyflt.inputs.reference =  diffusionMapPath
+    applyflt.inputs.apply_xfm = True
+    applyflt.inputs.in_matrix_file = fltout.outputs.out_matrix_file
+    applyflt.inputs.interp = 'nearestneighbour'
+    applyflt.inputs.out_file = os.path.join(tempDir, appendToBasename(args.segment[0], '_flirt', True))
+    applyflt.inputs.out_matrix_file = os.path.join(tempDir, appendToBasename(args.segment[0], '_flirt', True, '.mat'))
+    applyfltout = applyflt.run()
+
     
-    # register MNI first
+    # register MNI using ants affine + nonlinear
     antsReg = ants.Registration()
     antsReg.inputs.transforms = ['Affine', 'SyN']
     antsReg.inputs.transform_parameters = [(2.0,), (0.25, 3.0, 0.0)]
@@ -181,10 +205,10 @@ def registerAtlasToMap(args, outDir, diffusionMapPath):
     antsReg.inputs.sigma_units = ['vox'] * 2
     antsReg.inputs.shrink_factors = [[2,1], [3,2,1]]
     antsReg.inputs.use_histogram_matching = [True, True] # This is the default
-    antsReg.inputs.output_warped_image = os.path.join(outDir, 'output_warped_image.nii.gz')
-    antsReg.inputs.output_transform_prefix = os.path.join(outDir, 'transform_')
+    antsReg.inputs.output_warped_image = os.path.join(tempDir, appendToBasename(fltout.outputs.out_file, '_warped', True))
+    antsReg.inputs.output_transform_prefix = os.path.join(tempDir, 'transform_')
 
-    antsReg.inputs.moving_image = args.template[0]
+    antsReg.inputs.moving_image = fltout.outputs.out_file
     antsReg.inputs.fixed_image  = diffusionMapPath
     antsReg_out = antsReg.run()
     
@@ -194,16 +218,21 @@ def registerAtlasToMap(args, outDir, diffusionMapPath):
     antsAppTrfm.inputs.interpolation = 'NearestNeighbor'
     antsAppTrfm.inputs.default_value = 0
 
-    antsAppTrfm.inputs.input_image = args.segment[0]
+    antsAppTrfm.inputs.input_image = applyfltout.outputs.out_file
     antsAppTrfm.inputs.reference_image = diffusionMapPath
     antsAppTrfm.inputs.transforms = antsReg_out.outputs.reverse_forward_transforms
     antsAppTrfm.inputs.invert_transform_flags = antsReg_out.outputs.reverse_forward_invert_flags
-    antsAppTrfm.inputs.output_image = os.path.join(outDir, 'atlasregisteredToDiffMap.nii.gz')
+    antsAppTrfm.inputs.output_image = os.path.join(outDir, appendToBasename(args.segment[0], '_registeredToPatient', True, '.nii.gz'))
 
     applyout = antsAppTrfm.run()
     regsiteredAtlas = applyout.outputs.output_image
     print('The registered atlas was generated ans saved here:{}'.format(regsiteredAtlas))
+
+    print('Cleaning up intermediate products to save storage...')
+    shutil.rmtree(tempDir)
+
     return regsiteredAtlas
+
 
 def make_average_arr(diffusionMapPath, atlas_path):
     diffusionMap = nib.load(diffusionMapPath)
@@ -232,45 +261,29 @@ def make_average_arr(diffusionMapPath, atlas_path):
 
     return results_array
 
-# Handy function
-def getNiftiExtension(filepath):
-    nifti = '.nii'
-    niftigz = '.nii.gz'
-    if filepath[-7:] == niftigz:
-        return niftigz
-    elif filepath[-4:] == nifti:
-        return nifti
+# The standard os.path.splitext doesn't work well with multiple extensions i.e '.nii.gz'
+def split_full_extension(filepath):
+    # Split the file path into base and extension parts
+    base, ext = os.path.splitext(filepath)
+    # If it's a multi-part extension like .nii.gz, keep extracting until base has no further extension
+    while os.path.splitext(base)[1]:  
+        base, additional_ext = os.path.splitext(base)
+        ext = additional_ext + ext
+    return base, ext
+
+def appendToBasename(filepath, addedStr, onlyBasename=False, newext=None):
+    if addedStr is None:
+        raise ValueError("Invalid argument: 'added_str' cannot be None.")
+    if onlyBasename:
+        base, ext = split_full_extension(os.path.basename(filepath))
     else:
-        raise ValueError(f"The given file is not a nifti! File given was {filepath}")
+        base, ext = split_full_extension(filepath)
 
-# This can be helpful in improving registration
-def center_image_at_origin(image_path, outDir, coordinates=None):
-
-    centered_filename = os.path.basename(image_path).split('.')[0] + '_centered' + getNiftiExtension(image_path)
-    centered_path = os.path.join(outDir, centered_filename)
-
-    # Center of gravity in mm
-    if coordinates is None:
-        fslstats_cogmm = fsl.ImageStats(in_file=image_path, op_string= '-c')
-        cog_output = fslstats_cogmm.run()
-        cog_coords = np.array(cog_output.outputs.out_stat)
+    if newext is None:
+        return base + addedStr + ext
     else:
-        if not isinstance(coordinates, (list, np.ndarray)) or len(coordinates) != 3:
-            raise ValueError("Coordinates must be a list or array with exactly three items.")
-        cog_coords = coordinates
-    
-    image = nib.load(image_path)
-    affine = image.affine
+        return base + addedStr + newext
 
-    translation_vector = -cog_coords
-    translation_matrix = np.eye(4)
-    translation_matrix[:3, 3] = translation_vector
-    new_affine = np.dot(translation_matrix, affine)
-
-    new_image = nib.Nifti1Image(image.get_fdata(), new_affine)
-    nib.save(new_image, centered_path)
-    print(f"Image was recentered with CoG(mm) at the origin. Saved to {centered_path}")
-    return centered_path, cog_coords
 
 # very specific to diffusion maps outputted by qsiprep
 def extract_modality_suffix(filename):
@@ -295,19 +308,16 @@ def collectDiffusionMapPerROI(args, outDir):
             you run preprocess yor DWI? If so, check the file path name and \
             ensure it ends with {}".format(fa_suffix))
 
-    # Center and register the atlas to the FA map
-    facentered, fa_cog = center_image_at_origin(fa_path, outDir)
-    regsiteredAtlas = registerAtlasToMap(args, outDir, facentered)
+    # Register the atlas to the FA map
+    regsiteredAtlas = registerAtlasToMap(args, outDir, fa_path)
 
     # Recenter all maps based on FA center, and reuse the FA registered atlas
     # NOTE: This logic only works assuming all diffusion maps are in the same space at the start
     maps = [os.path.join(outDir, image) for image in os.listdir(outDir) if '_gqiscalar.nii.gz' in image]
     averages = []
     for image in maps:
+        avg_array = make_average_arr(image, regsiteredAtlas)
         modality = extract_modality_suffix(image)
-        if not '_centered.nii.gz' in image:
-            centered_image, _ = center_image_at_origin(image, outDir, fa_cog)
-        avg_array = make_average_arr(centered_image, regsiteredAtlas)
         output_csv_path = os.path.join(outDir, f"{modality}_averages.csv")
         print(f'Saving per ROI averages for {modality} map to {output_csv_path}')
         np.savetxt(output_csv_path, avg_array, delimiter=',', header=f'ROI,{modality}', comments='', fmt='%d,%f')
@@ -363,10 +373,12 @@ def main():
     ################################################################################
 
     # Move all stuff from T1/BOLD/DWI to new dir
-    # copyModalityOutputsToForgery(args, outDir)
+    copyModalityOutputsToForgery(args, outDir)
 
     # register atlas to diffusion maps and get ROI averages
     dti_averages = collectDiffusionMapPerROI(args, outDir)
+
+    # TO DO: if BOLD exists, calculate and output network stats
 
     # get struct features
     target_files = ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv']
@@ -379,13 +391,13 @@ def main():
     features = struct_files + dti_averages
     consolidateFeatures(args, outDir, features)
 
-    # take in fields user wants through a file
+    # # take in fields user wants through a file
 
-    # make a default file optinos (set 'custom' if you want to give your own file)
+    # # make a default file optinos (set 'custom' if you want to give your own file)
 
-    # set similarity to pearson/euclidean/cosine
+    # # set similarity to pearson/euclidean/cosine
 
-    # output name features_similarit.csv
+    # # output name features_similarit.csv
     
 
 
