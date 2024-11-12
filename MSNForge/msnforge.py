@@ -144,17 +144,21 @@ def copyModalityOutputsToForge(args, outDir):
     outDirPath = Path(outDir)
     basepath = outDirPath.parents[2]
 
+    successes = {}
+
     print('Copying T1 outputs...')
     t1Path = os.path.join(basepath, 'RadT1cal_Features', args.subject_id[0])
-    copy_modality_outputs(t1Path, outDir, ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv'])
+    successes['T1'] = copy_modality_outputs(t1Path, outDir, ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv'])
 
     print('Copying BOLD outputs...')
     boldPath = os.path.join(basepath, 'Sim_Funky_Pipeline', args.subject_id[0])
-    copy_modality_outputs(boldPath, outDir, ['average_arr.csv', 'sim_matrix.csv'])
+    successes['BOLD'] = copy_modality_outputs(boldPath, outDir, ['sim_matrix.csv'])
 
     print('Copying DTI outputs...')
     dtiPath = os.path.join(basepath, 'qsirecon', args.subject_id[0])
-    copy_modality_outputs(dtiPath, outDir, ['_gqiscalar.nii.gz'])
+    successes['DTI'] = copy_modality_outputs(dtiPath, outDir, ['_gqiscalar.nii.gz'])
+
+    return successes
 
 
 def registerAtlasToMap(args, outDir, diffusionMapPath):
@@ -325,6 +329,9 @@ def collectDiffusionMapPerROI(args, outDir):
 
     return averages
 
+def calculateFuncNetworkProperties(args, outDir):
+    print("DO BOLD THINGS")
+
 def consolidateFeatures(args, outDir, csv_files):
 
     combined_df = pd.DataFrame()
@@ -373,22 +380,27 @@ def main():
     ################################################################################
 
     # Move all stuff from T1/BOLD/DWI to new dir
-    copyModalityOutputsToForge(args, outDir)
+    successes = copyModalityOutputsToForge(args, outDir)
 
     # register atlas to diffusion maps and get ROI averages
-    dti_averages = collectDiffusionMapPerROI(args, outDir)
+    if not successes['DTI'] < 0:
+        dti_averages = collectDiffusionMapPerROI(args, outDir)
 
     # TO DO: if BOLD exists, calculate and output network stats
+    if not successes['BOLD'] < 0:
+        calculateFuncNetworkProperties(args, outDir)
 
     # get struct features
-    target_files = ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv']
-    struct_files = []
-    for i in os.listdir(outDir):
-        if any(target_file in i for target_file in target_files):
-            struct_files.append(os.path.join(outDir,i))
+    if not successes['T1'] < 0:
+        target_files = ['_trans_radiomicsFeatures.csv', '_trans_volumes.csv']
+        struct_files = []
+        for i in os.listdir(outDir):
+            if any(target_file in i for target_file in target_files):
+                struct_files.append(os.path.join(outDir,i))
 
     # combine all csvs into one table
     features = struct_files + dti_averages
+
     consolidateFeatures(args, outDir, features)
 
     # # take in fields user wants through a file
