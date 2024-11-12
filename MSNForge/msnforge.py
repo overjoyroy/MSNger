@@ -15,6 +15,7 @@ import re
 import shutil
 from pathlib import Path
 import time
+from scipy.stats import zscore
 
 DATATYPE_SUBJECT_DIR = 'anat'
 DATATYPE_FILE_SUFFIX = 'T1w'
@@ -351,6 +352,7 @@ def calculateFuncNetworkProperties(args, outDir):
     sim_matrix_file = 'func_sim_matrix.csv'
     sim_matrix_path = os.path.join(outDir, sim_matrix_file)
     sim_matrix = np.loadtxt(sim_matrix_path, delimiter=",") 
+    sim_matrix = np.abs(sim_matrix) # symmetric use of negative edge weights #maybe a config?
 
     atlas = nib.load(args.segment[0])
     atlas_array = atlas.get_fdata() 
@@ -365,7 +367,7 @@ def calculateFuncNetworkProperties(args, outDir):
         ('clustering_coefficient', lambda sm: bct.clustering_coef_wu(sm)),
         ('node_betweeness', lambda sm: bct.betweenness_wei(sm)),
         ('eigenvector_centrality', lambda sm: bct.eigenvector_centrality_und(sm)),
-        # ('participation_coef', lambda sm: bct.participation_coef(sm, bct.community_louvain(sm, B='negative_sym')[0])),
+        ('participation_coef', lambda sm: bct.participation_coef(sm, bct.community_louvain(sm, B='negative_sym')[0])),
         ('degree_at_abs50', lambda sm:bct.degrees_und(bct.threshold_absolute(np.abs(sm), 0.50))),
         ('degree_at_pro50', lambda sm:bct.degrees_und(bct.threshold_proportional(np.abs(sm), 0.50))),
         ('degree_at_abs25', lambda sm:bct.degrees_und(bct.threshold_absolute(np.abs(sm), 0.25))),
@@ -402,6 +404,24 @@ def consolidateFeatures(args, outDir, csv_files):
     print(f"Combined CSV of MSN features saved to {out_path}")
 
     return out_path
+
+
+def zscore_features(features_path, outDir):
+    df = pd.read_csv(features_path)
+    
+    # Ensure 'ROI' column exists and separate it from columns to be z-scored
+    if 'ROI' not in df.columns:
+        raise ValueError("The input CSV must have an 'ROI' column.")
+    
+    # Apply z-score normalization to all columns except 'ROI'
+    zscored_df = df.copy()
+    zscored_df.loc[:, zscored_df.columns != 'ROI'] = df.loc[:, df.columns != 'ROI'].apply(zscore)
+    
+    outpath = os.path.join(outDir, appendToBasename(features_path, '_standardized', True))
+    zscored_df.to_csv(outpath, index=False)
+    print(f'Features in {features_path} were standardized and saved to {outpath}')
+    return outpath
+
 
 
 def main():
@@ -455,9 +475,10 @@ def main():
 
     # combine all csvs into one table
     features = struct_files + dti_averages + bold_networkprops
+    consolidated = consolidateFeatures(args, outDir, features)
 
-    consolidateFeatures(args, outDir, features)
-    # normalize all columns
+    # standardize per column
+    consolidated_standardized = zscore_features(consolidated, outDir)
 
     # # take in fields user wants through a file
 
