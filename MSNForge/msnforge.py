@@ -140,7 +140,7 @@ def copy_modality_outputs(modality_path, out_dir, keywords=None):
     print("Copy operation complete.\n")
     return 0
 
-def copyModalityOutputsToForgery(args, outDir):
+def copyModalityOutputsToForge(args, outDir):
     outDirPath = Path(outDir)
     basepath = outDirPath.parents[2]
 
@@ -373,7 +373,7 @@ def main():
     ################################################################################
 
     # Move all stuff from T1/BOLD/DWI to new dir
-    copyModalityOutputsToForgery(args, outDir)
+    copyModalityOutputsToForge(args, outDir)
 
     # register atlas to diffusion maps and get ROI averages
     dti_averages = collectDiffusionMapPerROI(args, outDir)
