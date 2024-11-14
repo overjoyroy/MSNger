@@ -1,6 +1,7 @@
 #bin/python3
 import argparse
 import bct
+import json
 import nibabel as nib
 import nipy as nipy
 import nipype.interfaces.io as nio 
@@ -25,8 +26,8 @@ from utils import extract_modality_suffix
 
 def makeParser():
     parser = argparse.ArgumentParser(
-                        prog='T1_Preproc', 
-                        usage='This program preprocesses T1 MRIs for later use with an MSN development pipeline.',
+                        prog='MSNForge', 
+                        usage='This program is a continuation of MSNger and helps to build the MSNs after preprocessing the scans',
                         epilog='BUG REPORTING: Report bugs to pirc@chp.edu or more directly to Joy Roy at the Childrens Hospital of Pittsburgh.'
         )
     parser.add_argument('--version', action='version', version='%(prog)s 0.1')
@@ -34,16 +35,25 @@ def makeParser():
                         help='Path to the parent data directory. BIDS compatible datasets are encouraged.')
     parser.add_argument('-sid','--subject_id', nargs=1, required=False,
                         help='Subject ID used to indicate which patient to preprocess')
-    # parser.add_argument('-spath','--subject_t1_path', nargs=1, required=False,
-    #                     help='Path to a subjects T1 scan. This is not necessary if subject ID is provided as the T1 will be automatically found using the T1w.nii.gz extension')
     parser.add_argument('-ses_id','--session_id', nargs=1, required=False,
                         help='Session ID used to indicate which session to look for the patient to preprocess')
     parser.add_argument('-tem','--template', nargs=1, required=False,
                         help='Template to be used to register into patient space. Default is MNI152lin_T1_2mm_brain.nii.gz')
     parser.add_argument('-seg','--segment', nargs=1, required=False,
-                        help='Atlas to be used to identify brain regions in patient space. This is used in conjunction with the template. Please ensure that the atlas is in the same space as the template. Default is the AALv2 template.')
+                        help='Atlas to be used to identify brain regions in patient space. This is used in conjunction with the template. \
+                        Please ensure that the atlas is in the same space as the template. Default is the AALv2 template.')
     parser.add_argument('-o','--outDir', nargs=1, required=True,
                         help='Path to the \'derivatives\' folder or chosen out folder.')
+    parser.add_argument('--features', required=False, choices=['all','vol_radb_diff','custom'], default='all', 
+                        help='Specify which set of features to include in the MSN: '
+                        '"all" for all available features, or "custom" to provide your own list of features. '
+                        'See the "features.json" file for a list of available features and an example of how to structure the custom file. '
+                        'Use "custom" if you want to specify a custom set of features via the --customFeatureFile.')
+    parser.add_argument('--featureFile', nargs=1, required=False, 
+                        help='JSON file containing a custom list of features to include in the MSN. '
+                        'This argument is required if --features is set to "custom".')
+    parser.add_argument('--similarity_measure', required=False, choices=['pearsonr', 'cosine', 'inverse_euclidean'], default='pearsonr', 
+                        help='Specify the similarity measure to use for computing similarity between ROIs. Options: "pearsonr" (default).')
     parser.add_argument('--testmode', required=False, action='store_true',
                         help='Activates TEST_MODE to make pipeline finish faster for quicker debugging')
 
@@ -91,6 +101,22 @@ def vet_inputs(args):
         for i in os.listdir(os.path.join(args.parentDir[0], args.subject_id[0])):
             if 'ses-' in i:
                 ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
+
+    # configure the desired features for the MSN
+    if args.features == 'custom':
+        if args.featureFile is None or args.featureFile[0] is None:
+            raise ValueError("Custom featureFile cannot be None if features is set to 'custom'.")
+        else:
+            if not os.path.exists(args.featureFile[0]): 
+                raise ValueError("Path to custom featureFile does not exist.")
+            else:
+                args.featureFile = [os.path.abspath(os.path.expanduser(args.featureFile[0]))]
+    else:
+        args.featureFile = ['/app/Template/features.json']
+
+    if args.featureFile is not None and args.features != 'custom':
+        print("WARNING: featureFile was provided, but the feature flag is not set to 'custom'. ,Ignoring featureFile.")
+
     
     return args
 
@@ -314,6 +340,67 @@ def zscore_features(features_path, outDir):
     print(f'Features in {features_path} were standardized and saved to {outpath}')
     return outpath
 
+def load_features(config_file, feature_set=None):
+    # Load the JSON data
+    with open(config_file, 'r') as file:
+        data = json.load(file)
+
+    # Check if the specified feature set exists in the JSON
+    if feature_set is None:
+        feature_set = next(iter(data))
+    if feature_set in data:
+        # Return the selected features list
+        print(f"Desired features to build MSN: {data[feature_set]}")
+        return feature_set, data[feature_set]
+    else:
+        raise ValueError(f"Feature set '{feature_set}' not found in the configuration file.")
+
+def vet_desired_features(desired_features, available_features):
+    available_columns = set(pd.read_csv(available_features).columns)
+    desired_columns = set(desired_features)
+    missing_columns = desired_columns - available_columns
+    if len(missing_columns) == 0:
+        return True
+    else:
+        raise ValueError(f"The following desired features are missing from available features: {missing_columns}")
+
+
+# Define similarity functions
+def pearson_similarity(a, b):
+    """Compute Pearson correlation coefficient between two vectors."""
+    return np.corrcoef(a, b)[0, 1]
+
+def cosine_similarity(a, b):
+    """Compute Cosine similarity between two vectors."""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def inverse_euclidean_similarity(a, b):
+    """Compute Inverse Euclidean distance between two vectors."""
+    return 1 / (1 + np.linalg.norm(a - b))
+
+def computeMSN(args, outDir, consolidated_standardized_path, desiredFeaturesList, similarity_function=pearson_similarity):
+    print("COMPUTING MSN")
+    df = pd.read_csv(consolidated_standardized_path)
+    
+    # Extract, Zscore, similarity, save
+    roi = df['ROI']
+    features = df.drop(columns=['ROI'])
+    desiredFeatures = features[desiredFeaturesList]
+
+    num_rois = features.shape[0]
+    sim_matrix = np.zeros((num_rois, num_rois))
+
+    # Compute similarity between every pair of ROIs
+    for i in range(num_rois):
+        for j in range(i+1, num_rois):  # We only need to compute half of the matrix (upper triangular)
+            sim = similarity_function(desiredFeatures.iloc[i].values, desiredFeatures.iloc[j].values)
+            sim_matrix[i, j] = sim
+            sim_matrix[j, i] = sim  # The matrix is symmetric
+
+    np.fill_diagonal(sim_matrix, 0.)
+    sim_matrix_path = os.path.join(outDir, f'MSN_{args.features}_{args.similarity_measure}.csv')
+    np.savetxt(sim_matrix_path, sim_matrix, delimiter=",")
+    print('Saving MSN to {}'.format(sim_matrix_path))
 
 
 def main():
@@ -324,12 +411,8 @@ def main():
     parser = makeParser()
     args   = parser.parse_args()
     args   = vet_inputs(args)
-    data_dir      = os.path.abspath(os.path.expanduser(args.parentDir[0]))
     outDir        = ''
     outDirName    = 'MSNForge'
-    session       = vetArgNone(args.session_id, None)
-    template_path = vetArgNone(args.template, '/app/Template/MNI152lin_T1_2mm_brain.nii.gz') #path in docker container
-    segment_path  = vetArgNone(args.segment, '/app/Template/aal2.nii.gz') #path in docker container
     enforceBIDS   = True
 
     #patient specific outDir
@@ -343,7 +426,7 @@ def main():
     ### WORK WORK
     ################################################################################
 
-    # Move all stuff from T1/BOLD/DWI to new dir
+    # # Move all stuff from T1/BOLD/DWI to new dir
     successes = copyModalityOutputsToForge(args, outDir)
 
     # get struct features
@@ -354,7 +437,7 @@ def main():
             if any(target_file in i for target_file in target_files):
                 struct_files.append(os.path.join(outDir,i))
 
-    # register atlas to diffusion maps and get ROI averages
+    # # register atlas to diffusion maps and get ROI averages
     dti_averages = []
     if not successes['DTI'] < 0:
         dti_averages = collectDiffusionMapPerROI(args, outDir)
@@ -366,20 +449,30 @@ def main():
         bold_networkprops = calculateFuncNetworkProperties(args, outDir)
 
     # combine all csvs into one table
-    features = struct_files + dti_averages + bold_networkprops
-    consolidated = consolidateFeatures(args, outDir, features)
+    availableFeatures = struct_files + dti_averages + bold_networkprops
+    consolidated_path = consolidateFeatures(args, outDir, availableFeatures)
 
     # standardize per column
-    consolidated_standardized = zscore_features(consolidated, outDir)
+    consolidated_standardized_path = zscore_features(consolidated_path, outDir)
+
+    if args.features == 'custom':
+        setName, desiredFeatures_names = load_features(args.featureFile[0])
+        args.features = f'custom-{setName}'
+    else:
+        setName, desiredFeatures_names = load_features(args.featureFile[0], feature_set=args.features)
+
+    # identify the features user wants
+    check = vet_desired_features(desiredFeatures_names, consolidated_standardized_path)
 
     # # take in fields user wants through a file
+    if args.similarity_measure =='pearsonr':
+        similarity_function = pearson_similarity
+    elif args.similarity_measure =='cosine':
+        similarity_function = cosine_similarity
+    elif args.similarity_measure =='inverse_euclidean':
+        similarity_function = inverse_euclidean_similarity
 
-    # # make a default file optinos (set 'custom' if you want to give your own file)
-
-    # # set similarity to pearson/euclidean/cosine
-
-    # # output name features_similarit.csv
-    
+    MSN = computeMSN(args, outDir, consolidated_standardized_path, desiredFeatures_names, similarity_function)
 
 
 if __name__ == "__main__":
