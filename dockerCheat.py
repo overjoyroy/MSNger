@@ -42,7 +42,7 @@ def makeParser():
     parser.add_argument('--similarity_measure', required=False, choices=['pearsonr', 'cosine', 'inverse_euclidean'], default='pearsonr', 
                         help='Specify the similarity measure to use for computing similarity between ROIs. Options: "pearsonr" (default).')
     parser.add_argument('--skipforge', required=False, action='store_true',
-                        help='Skips the MSN generation. Use only if you want to focus on preprocessing')
+                        help='Skips the MSN generation. Use if you only want to focus on preprocessing.')
     parser.add_argument('--supersizeme', required=False, action='store_true',
                         help='Get every combination of MSN from the default features list')
     parser.add_argument('--animalstyle', required=False, action='store_true',
@@ -118,8 +118,23 @@ def vet_inputs(args):
     
     return args
 
+def printBar(length=64):
+    fillerstring = '#'
+    print(fillerstring * length)
+
 def preprocess_T1w(args):
     print(args)
+    command = ["-p", "/data", 
+                "-o", "/out",
+                "-sid", args.subject_id[0], 
+                "--session_id", args.session_id[0], 
+                "--template", args.template[0],
+                "--segment", args.segment[0]
+                ]
+
+    if args.testmode:
+        command.append("--testmode")
+
     try:
         docker.run("jor115/t1proc",
                    interactive=True,
@@ -128,9 +143,7 @@ def preprocess_T1w(args):
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
                    volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
-                   command=["-p", "/data", "-o", "/out",
-                            "-sid", args.subject_id[0], 
-                            "--session_id", args.session_id[0]]
+                   command=command
                    )
         return 0
     except KeyboardInterrupt:
@@ -143,6 +156,17 @@ def preprocess_T1w(args):
 
 
 def preprocess_rsfMRI(args):
+    command = ["-p", "/data", 
+                "-o", "/out",
+                "-sid", args.subject_id[0], 
+                "--session_id", args.session_id[0], 
+                "--template", args.template[0],
+                "--segment", args.segment[0]
+                ]
+
+    if args.testmode:
+        command.append("--testmode")
+
     try:
         docker.run("jor115/sfp",
                    interactive=True,
@@ -151,9 +175,7 @@ def preprocess_rsfMRI(args):
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
                    volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
-                   command=["-p", "/data", "-o", "/out",
-                            "-sid", args.subject_id[0], 
-                            "--session_id", args.session_id[0]]
+                   command=command
                    )
         return 0
     except KeyboardInterrupt:
@@ -210,7 +232,8 @@ def itsforgingtime(args):
             "-o", "/out",
             "-sid", args.subject_id[0], 
             "--session_id", args.session_id[0],
-            "--features", args.features
+            "--features", args.features, 
+            "--similarity_measure", args.similarity_measure
         ]
         # Add featureFile if provided
         if args.featureFile:
@@ -223,6 +246,9 @@ def itsforgingtime(args):
         # Check and add the animalstyle flag if it is set
         if args.animalstyle:
             command.append("--animalstyle")
+
+        if args.testmode:
+            command.append("--testmode")
 
         docker.run("jor115/msnforge",
                    interactive=True,
@@ -259,19 +285,23 @@ def batch_process_whole_dataset(args):
                     if not args.preprocess_only == 'none':
                         print('Preprocessing: {}-{}'.format(args.subject_id[0], args.session_id[0]))
                         res = preprocess(args)
+                        if res != 0:  # if there was an issue with preprocessing
+                            processing_error.append(f"Preprocessing error: {json.dumps(vars(args), indent=2)}")
                     else: 
                         print("Skipping all image preprocessing...")
 
+                    if res!=0:
+                        printBar()
+                        continue
+
                     if not args.skipforge:
                         res = itsforgingtime(args)
+                        if res != 0:  # if there was an issue with forging
+                            processing_error.append(f"Forging error: {json.dumps(vars(args), indent=2)}")
                     else:
                         print("Skipping forging...")
 
-                    if res !=0:
-                        processing_error.append(json.dumps(vars(args), indent=2))
-
-                    fillerstring = '#'
-                    print(fillerstring * 64)
+                    printBar()
 
     return processing_error
 
@@ -284,27 +314,31 @@ def main():
     print("Arguments given: {}".format(args))
 
     res = 0
+    processing_error = []
     if args.batch_whole_dataset:
-        errors = batch_process_whole_dataset(args)
-        print(f"Errors with the following args :")
-        for index, err in enumerate(errors):
-            print(f'\t{index}:{err}')
-
+        processing_error = batch_process_whole_dataset(args)
     else:
         if not args.preprocess_only == 'none':
             print('Preprocessing: {}-{}'.format(args.subject_id[0], args.session_id[0]))
             res = preprocess(args)
+            if res!=0:
+                processing_error.append(f"Preprocessing error: {json.dumps(vars(args), indent=2)}")
         else: 
             print("Skipping all image preprocessing...")
 
-        if not args.skipforge:
-            res = itsforgingtime(args)
-        else:
-            print("Skipping forging...")
+        if res==0:
+            if not args.skipforge:
+                res = itsforgingtime(args)
+                if res!=0:
+                    processing_error.append(f"Preprocessing error: {json.dumps(vars(args), indent=2)}")
+            else:
+                print("Skipping forging...")
 
-    if res !=0:
-        print(f"Errors with the following args {args}")
-    print("Done!")
+    if len(processing_error) > 0:
+        print("Errors with the following args:")
+        for index, err in enumerate(processing_error):  # Correct variable name here
+            print(f'\t{index}: {err}')
+        print("Done!")
 
 
 
