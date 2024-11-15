@@ -134,10 +134,9 @@ def vet_inputs(args):
             else:
                 args.featureFile = [os.path.abspath(os.path.expanduser(args.featureFile[0]))]
     else:
+        if args.featureFile is not None:
+            print("WARNING: featureFile was provided, but the feature flag is not set to 'custom'. ,Ignoring featureFile.")
         args.featureFile = ['/app/Template/features.json']
-
-    if args.featureFile is not None and args.features != 'custom':
-        print("WARNING: featureFile was provided, but the feature flag is not set to 'custom'. ,Ignoring featureFile.")
 
     
     return args
@@ -218,6 +217,7 @@ def copyModalityOutputsToForge(args, outDir):
 
 
 def make_average_arr(diffusionMapPath, atlas_path):
+    print("Calculating averages per roi in the diffusion maps...")
     diffusionMap = nib.load(diffusionMapPath)
     atlas = nib.load(atlas_path)
     diffusionMap_array = diffusionMap.get_fdata()
@@ -246,7 +246,7 @@ def make_average_arr(diffusionMapPath, atlas_path):
 
 # save diffusion maps in tabular format
 def collectDiffusionMapPerROI(args, outDir):
-    print('\nCollecting diffusion map averages...')
+    print('\nCollecting diffusion map roi features...')
     fa_suffix = 'dti_fa_gqiscalar.nii.gz'
     fa_path = None
     for file in os.listdir(outDir):
@@ -378,7 +378,7 @@ def load_features(config_file, feature_set=None):
 
     if feature_set in data:
         # Return the selected features list
-        print(f"Desired features to build MSN: {data[feature_set]}")
+        print(f"Desired features from '{feature_set}' to build MSN: {data[feature_set]}")
         return (feature_set, data[feature_set])
     else:
         raise ValueError(f"Feature set '{feature_set}' not found in the configuration file.")
@@ -431,6 +431,7 @@ def miniMSNPipeline(args, outDir, consolidated_standardized_path, featureSet, si
     check = vet_desired_features(desiredFeatures[1], consolidated_standardized_path)
     # Compute MSN
     computeMSN(args, outDir, consolidated_standardized_path, desiredFeatures, similarity_function)
+    print() #empty print intentional
 
 
 def main():
@@ -485,7 +486,6 @@ def main():
     consolidated_standardized_path = zscore_features(consolidated_path, outDir)
 
     featureSet = getFeatureSets(args.featureFile[0])
-    print(featureSet)
     errors = []
     if args.animalstyle:
         for j in similarity_functions.keys():

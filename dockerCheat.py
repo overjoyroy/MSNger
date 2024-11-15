@@ -2,6 +2,7 @@ import os
 from python_on_whales import docker
 import argparse
 from tqdm import tqdm
+import json
 
 def makeParser():
     parser = argparse.ArgumentParser(
@@ -30,6 +31,22 @@ def makeParser():
     #                     help='Flag to skip preprocessing scans.')
     parser.add_argument( '--preprocess_only', required=False, choices=['all', 'none', 'dwi', 't1', 'bold'], default='all', 
                         help='Specify which modality to preprocess: "all", "none", or a particular modality (e.g., "dwi", "t1", "bold").')
+    parser.add_argument('--features', required=False, choices=['all','vol_radb_diff','custom'], default='all', 
+                        help='Specify which set of features to include in the MSN: '
+                        '"all" for all available features, or "custom" to provide your own list of features. '
+                        'See the "features.json" file for a list of available features and an example of how to structure the custom file. '
+                        'Use "custom" if you want to specify a custom set of features via the --customFeatureFile.')
+    parser.add_argument('--featureFile', nargs=1, required=False, 
+                        help='JSON file containing a custom list of features to include in the MSN. '
+                        'This argument is required if --features is set to "custom".')
+    parser.add_argument('--similarity_measure', required=False, choices=['pearsonr', 'cosine', 'inverse_euclidean'], default='pearsonr', 
+                        help='Specify the similarity measure to use for computing similarity between ROIs. Options: "pearsonr" (default).')
+    parser.add_argument('--skipforge', required=False, action='store_true',
+                        help='Skips the MSN generation. Use only if you want to focus on preprocessing')
+    parser.add_argument('--supersizeme', required=False, action='store_true',
+                        help='Get every combination of MSN from the default features list')
+    parser.add_argument('--animalstyle', required=False, action='store_true',
+                        help='Get every combination of MSN from the similarity measure, includes custom feature files')
     parser.add_argument('--testmode', required=False, action='store_true',
                         help='Activates TEST_MODE to make pipeline finish faster for quicker debugging')
 
@@ -83,6 +100,21 @@ def vet_inputs(args):
             for i in os.listdir(os.path.join(args.parentDir[0], args.subject_id[0])):
                 if 'ses-' in i:
                     ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
+
+    # configure the desired features for the MSN
+    if args.features == 'custom':
+        if args.featureFile is None or args.featureFile[0] is None:
+            raise ValueError("Custom featureFile cannot be None if features is set to 'custom'.")
+        else:
+            if not os.path.exists(args.featureFile[0]): 
+                raise ValueError("Path to custom featureFile does not exist.")
+            else:
+                args.featureFile = [os.path.abspath(os.path.expanduser(args.featureFile[0]))]
+    else:
+        if args.featureFile is not None:
+            print("WARNING: featureFile was provided, but the feature flag is not set to 'custom'. ,Ignoring featureFile.")
+        args.featureFile = ['/app/Template/features.json']
+        
     
     return args
 
@@ -100,6 +132,7 @@ def preprocess_T1w(args):
                             "-sid", args.subject_id[0], 
                             "--session_id", args.session_id[0]]
                    )
+        return 0
     except KeyboardInterrupt:
         print("Keyboard interrupt received. Stopping the container...")
         return 1
@@ -122,6 +155,7 @@ def preprocess_rsfMRI(args):
                             "-sid", args.subject_id[0], 
                             "--session_id", args.session_id[0]]
                    )
+        return 0
     except KeyboardInterrupt:
         print("Keyboard interrupt received. Stopping the container...")
         return 1
@@ -168,9 +202,50 @@ def preprocess(args):
         preprocess_rsfMRI(args)
         preprocess_DTI(args)
     
+def itsforgingtime(args):
+    try:
+
+        command = [
+            "-p", "/data", 
+            "-o", "/out",
+            "-sid", args.subject_id[0], 
+            "--session_id", args.session_id[0],
+            "--features", args.features
+        ]
+        # Add featureFile if provided
+        if args.featureFile:
+            command.extend(["--featureFile", args.featureFile[0]])
+
+        # Check and add the supersizeme flag if it is set
+        if args.supersizeme:
+            command.append("--supersizeme")
+
+        # Check and add the animalstyle flag if it is set
+        if args.animalstyle:
+            command.append("--animalstyle")
+
+        docker.run("jor115/msnforge",
+                   interactive=True,
+                   tty=True,
+                   remove=True,
+                   user="{}:{}".format(os.getuid(), os.getgid()),
+                   platform="linux/amd64",
+                   volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
+                   command=command
+
+                   )
+
+        return 0
+    except KeyboardInterrupt:
+        print("Keyboard interrupt received. Stopping the container...")
+        return 1
+    except Exception as e:
+        print(f"Error, patient MSNger couldn't complete... {e}")
+        return 1
 
 
-def batch_preprocess_whole_dataset(args):
+def batch_process_whole_dataset(args):
+    processing_error = []
     print('Batch preprocessing in place!')
     for subj in tqdm(os.listdir(args.parentDir[0])):
         if 'sub-' in subj[:4]:
@@ -179,10 +254,26 @@ def batch_preprocess_whole_dataset(args):
             for sess in os.listdir(subjdir):
                 if 'ses-' in sess:
                     args.session_id = [sess] # set session
-                    
+                    res = 0
+
                     if not args.preprocess_only == 'none':
                         print('Preprocessing: {}-{}'.format(args.subject_id[0], args.session_id[0]))
-                        preprocess(args)
+                        res = preprocess(args)
+                    else: 
+                        print("Skipping all image preprocessing...")
+
+                    if not args.skipforge:
+                        res = itsforgingtime(args)
+                    else:
+                        print("Skipping forging...")
+
+                    if res !=0:
+                        processing_error.append(json.dumps(vars(args), indent=2))
+
+                    fillerstring = '#'
+                    print(fillerstring * 64)
+
+    return processing_error
 
             
 
@@ -192,13 +283,28 @@ def main():
     args   = vet_inputs(args)
     print("Arguments given: {}".format(args))
 
-    if not args.preprocess_only == 'none':
-        if args.batch_whole_dataset:
-            batch_preprocess_whole_dataset(args)
-        else:
-            preprocess(args)
+    res = 0
+    if args.batch_whole_dataset:
+        errors = batch_process_whole_dataset(args)
+        print(f"Errors with the following args :")
+        for index, err in enumerate(errors):
+            print(f'\t{index}:{err}')
+
     else:
-        print("Skipping all image preprocessing...")
+        if not args.preprocess_only == 'none':
+            print('Preprocessing: {}-{}'.format(args.subject_id[0], args.session_id[0]))
+            res = preprocess(args)
+        else: 
+            print("Skipping all image preprocessing...")
+
+        if not args.skipforge:
+            res = itsforgingtime(args)
+        else:
+            print("Skipping forging...")
+
+    if res !=0:
+        print(f"Errors with the following args {args}")
+    print("Done!")
 
 
 
