@@ -486,24 +486,37 @@ def main():
 
     featureSet = getFeatureSets(args.featureFile[0])
     print(featureSet)
-    
+    errors = []
     if args.animalstyle:
         for j in similarity_functions.keys():
             if args.supersizeme:
                 for i in featureSet:
-                    miniMSNPipeline(args, outDir, consolidated_standardized_path, i, j)
+                    try:
+                        miniMSNPipeline(args, outDir, consolidated_standardized_path, i, j)
+                    except Exception as e:
+                        errors.append(f"Error with feature '{i}' and similarity '{j}': {str(e)}")
             else:
                 selected_feature = args.features if args.features != 'custom' else featureSet[0]
-                miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, j)
+                try:
+                    miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, j)
+                except Exception as e:
+                    errors.append(f"Error with feature '{selected_feature}' and similarity '{j}': {str(e)}")
     else:
         if args.supersizeme:
             for i in featureSet:
-                miniMSNPipeline(args, outDir, consolidated_standardized_path, i, args.similarity_measure)
+                try: 
+                    miniMSNPipeline(args, outDir, consolidated_standardized_path, i, args.similarity_measure)
+                except Exception as e:
+                    errors.append(f"Error with feature '{i}' and similarity '{j}': {str(e)}")
         else:
             selected_feature = args.features if args.features != 'custom' else featureSet[0]
-            miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, args.similarity_measure)
+            try:
+                miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, args.similarity_measure)
+            except Exception as e:
+                errors.append(f"Error with feature '{selected_feature}' and similarity '{args.similarity_measure}': {str(e)}")
 
-
+    if errors:
+        raise Exception("Errors encountered:\n" + "\n".join(errors))
 
 if __name__ == "__main__":
     try:

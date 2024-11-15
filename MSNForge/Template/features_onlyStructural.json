@@ -1,0 +1,80 @@
+{
+
+  "vol_radb":[
+    "Volume_mm3", 
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness"
+  ],
+
+  "vol_diff":[
+    "Volume_mm3", 
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  "radb_diff":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  "vol_radb_diff":[
+    "Volume_mm3", 
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  
+  "Radiomic_basic": [
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness"
+  ],
+
+  "Radiomic_all": [
+	"original_firstorder_10Percentile",
+	"original_firstorder_90Percentile",
+	"original_firstorder_Energy",
+	"original_firstorder_Entropy",
+	"original_firstorder_InterquartileRange",
+	"original_firstorder_Kurtosis",
+	"original_firstorder_Maximum",
+	"original_firstorder_Mean",
+	"original_firstorder_MeanAbsoluteDeviation",
+	"original_firstorder_Median",
+	"original_firstorder_Minimum",
+	"original_firstorder_Range",
+	"original_firstorder_RobustMeanAbsoluteDeviation",
+	"original_firstorder_RootMeanSquared",
+	"original_firstorder_Skewness",
+	"original_firstorder_TotalEnergy",
+	"original_firstorder_Uniformity",
+	"original_firstorder_Variance"
+  ],
+
+  "Diffusion": [
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ]
+
+  
+}
+

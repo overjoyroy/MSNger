@@ -14,5 +14,5 @@ RUN echo "source ${FSLDIR}/etc/fslconf/fsl.sh" >> /etc/profile
 
 
 WORKDIR /tmp
-ENTRYPOINT ["python3", "/app/t1_preproc.py"]
+ENTRYPOINT ["python3", "/app/msnforge.py"]
 CMD [""]
