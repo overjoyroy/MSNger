@@ -23,6 +23,24 @@ from utils import split_full_extension
 from utils import appendToBasename
 from utils import extract_modality_suffix
 
+# Define similarity functions
+def pearson_similarity(a, b):
+    """Compute Pearson correlation coefficient between two vectors."""
+    return np.corrcoef(a, b)[0, 1]
+
+def cosine_similarity(a, b):
+    """Compute Cosine similarity between two vectors."""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def inverse_euclidean_similarity(a, b):
+    """Compute Inverse Euclidean distance between two vectors."""
+    return 1 / (1 + np.linalg.norm(a - b))
+
+similarity_functions = {
+        'pearsonr': pearson_similarity,
+        'cosine': cosine_similarity,
+        'inverse_euclidean': inverse_euclidean_similarity
+    }
 
 def makeParser():
     parser = argparse.ArgumentParser(
@@ -56,6 +74,10 @@ def makeParser():
                         help='Specify the similarity measure to use for computing similarity between ROIs. Options: "pearsonr" (default).')
     parser.add_argument('--testmode', required=False, action='store_true',
                         help='Activates TEST_MODE to make pipeline finish faster for quicker debugging')
+    parser.add_argument('--supersizeme', required=False, action='store_true',
+                        help='Get every combination of MSN from the default features list')
+    parser.add_argument('--animalstyle', required=False, action='store_true',
+                        help='Get every combination of MSN from the similarity measure, includes custom feature files')
 
     return parser 
 
@@ -340,18 +362,24 @@ def zscore_features(features_path, outDir):
     print(f'Features in {features_path} were standardized and saved to {outpath}')
     return outpath
 
+def getFeatureSets(config_file):
+    # Load the JSON data
+    with open(config_file, 'r') as file:
+        data = json.load(file)
+
+    available_feature_sets = list(data.keys())
+    print(f"Available feature sets: {available_feature_sets}")
+    return available_feature_sets
+
 def load_features(config_file, feature_set=None):
     # Load the JSON data
     with open(config_file, 'r') as file:
         data = json.load(file)
 
-    # Check if the specified feature set exists in the JSON
-    if feature_set is None:
-        feature_set = next(iter(data))
     if feature_set in data:
         # Return the selected features list
         print(f"Desired features to build MSN: {data[feature_set]}")
-        return feature_set, data[feature_set]
+        return (feature_set, data[feature_set])
     else:
         raise ValueError(f"Feature set '{feature_set}' not found in the configuration file.")
 
@@ -365,42 +393,44 @@ def vet_desired_features(desired_features, available_features):
         raise ValueError(f"The following desired features are missing from available features: {missing_columns}")
 
 
-# Define similarity functions
-def pearson_similarity(a, b):
-    """Compute Pearson correlation coefficient between two vectors."""
-    return np.corrcoef(a, b)[0, 1]
-
-def cosine_similarity(a, b):
-    """Compute Cosine similarity between two vectors."""
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-def inverse_euclidean_similarity(a, b):
-    """Compute Inverse Euclidean distance between two vectors."""
-    return 1 / (1 + np.linalg.norm(a - b))
-
-def computeMSN(args, outDir, consolidated_standardized_path, desiredFeaturesList, similarity_function=pearson_similarity):
+def computeMSN(args, outDir, consolidated_standardized_path, desiredFeaturesTuple, similarity_function='pearsonr'):
     print("COMPUTING MSN")
     df = pd.read_csv(consolidated_standardized_path)
     
-    # Extract, Zscore, similarity, save
+    # Extract, Z-score, and select desired features
     roi = df['ROI']
     features = df.drop(columns=['ROI'])
-    desiredFeatures = features[desiredFeaturesList]
+    desiredFeatures = features[desiredFeaturesTuple[1]]
 
-    num_rois = features.shape[0]
+    num_rois = desiredFeatures.shape[0]
     sim_matrix = np.zeros((num_rois, num_rois))
+
+    # Choose similarity function from dictionary if specified in args
+    similarity_func = similarity_functions.get(similarity_function, pearson_similarity)
 
     # Compute similarity between every pair of ROIs
     for i in range(num_rois):
-        for j in range(i+1, num_rois):  # We only need to compute half of the matrix (upper triangular)
-            sim = similarity_function(desiredFeatures.iloc[i].values, desiredFeatures.iloc[j].values)
+        for j in range(i + 1, num_rois):  # Only compute upper triangular matrix
+            sim = similarity_func(desiredFeatures.iloc[i].values, desiredFeatures.iloc[j].values)
             sim_matrix[i, j] = sim
-            sim_matrix[j, i] = sim  # The matrix is symmetric
+            sim_matrix[j, i] = sim  # Matrix is symmetric
 
     np.fill_diagonal(sim_matrix, 0.)
-    sim_matrix_path = os.path.join(outDir, f'MSN_{args.features}_{args.similarity_measure}.csv')
+    if args.features == 'custom':
+        sim_matrix_path = os.path.join(outDir, f'MSN_feats-custom-{desiredFeaturesTuple[0]}_simfunc-{similarity_function}.csv')
+    else:
+        sim_matrix_path = os.path.join(outDir, f'MSN_feats-{desiredFeaturesTuple[0]}_simfunc-{similarity_function}.csv')
+
     np.savetxt(sim_matrix_path, sim_matrix, delimiter=",")
-    print('Saving MSN to {}'.format(sim_matrix_path))
+    print(f'Saving MSN to {sim_matrix_path}')
+    
+
+def miniMSNPipeline(args, outDir, consolidated_standardized_path, featureSet, similarity_function='pearsonr'):
+    # Load and validate desired features
+    desiredFeatures = load_features(args.featureFile[0], feature_set=featureSet)
+    check = vet_desired_features(desiredFeatures[1], consolidated_standardized_path)
+    # Compute MSN
+    computeMSN(args, outDir, consolidated_standardized_path, desiredFeatures, similarity_function)
 
 
 def main():
@@ -420,7 +450,6 @@ def main():
 
     if args.testmode:
         print("!!YOU ARE USING TEST MODE!!")
-
 
     ################################################################################
     ### WORK WORK
@@ -455,24 +484,25 @@ def main():
     # standardize per column
     consolidated_standardized_path = zscore_features(consolidated_path, outDir)
 
-    if args.features == 'custom':
-        setName, desiredFeatures_names = load_features(args.featureFile[0])
-        args.features = f'custom-{setName}'
+    featureSet = getFeatureSets(args.featureFile[0])
+    print(featureSet)
+    
+    if args.animalstyle:
+        for j in similarity_functions.keys():
+            if args.supersizeme:
+                for i in featureSet:
+                    miniMSNPipeline(args, outDir, consolidated_standardized_path, i, j)
+            else:
+                selected_feature = args.features if args.features != 'custom' else featureSet[0]
+                miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, j)
     else:
-        setName, desiredFeatures_names = load_features(args.featureFile[0], feature_set=args.features)
+        if args.supersizeme:
+            for i in featureSet:
+                miniMSNPipeline(args, outDir, consolidated_standardized_path, i, args.similarity_measure)
+        else:
+            selected_feature = args.features if args.features != 'custom' else featureSet[0]
+            miniMSNPipeline(args, outDir, consolidated_standardized_path, selected_feature, args.similarity_measure)
 
-    # identify the features user wants
-    check = vet_desired_features(desiredFeatures_names, consolidated_standardized_path)
-
-    # # take in fields user wants through a file
-    if args.similarity_measure =='pearsonr':
-        similarity_function = pearson_similarity
-    elif args.similarity_measure =='cosine':
-        similarity_function = cosine_similarity
-    elif args.similarity_measure =='inverse_euclidean':
-        similarity_function = inverse_euclidean_similarity
-
-    MSN = computeMSN(args, outDir, consolidated_standardized_path, desiredFeatures_names, similarity_function)
 
 
 if __name__ == "__main__":
