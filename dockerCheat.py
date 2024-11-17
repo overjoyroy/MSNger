@@ -78,14 +78,14 @@ def vet_inputs(args):
     # Convert template path to absolute if provided and relative
     if args.template:
         args.template = [os.path.abspath(os.path.expanduser(args.template[0]))]
-    else:
-        args.template = ['/app/Template/MNI152lin_T1_2mm_brain.nii.gz']
+    # else:
+    #     args.template = ['/app/Template/MNI152lin_T1_2mm_brain.nii.gz']
     
     # Convert segmentation atlas path to absolute if provided and relative
     if args.segment:
         args.segment = [os.path.abspath(os.path.expanduser(args.segment[0]))]
-    else:
-        args.segment = ['/app/Template/aal2.nii.gz']
+    # else:
+    #     args.segment = ['/app/Template/aal2.nii.gz']
     
     # Validate subject ID
     if not args.batch_whole_dataset:
@@ -123,17 +123,28 @@ def printBar(length=64):
     print(fillerstring * length)
 
 def preprocess_T1w(args):
-    print(args)
+    volumes = [(args.parentDir[0], "/data"), (args.outDir[0], "/out")]
+
     command = ["-p", "/data", 
                 "-o", "/out",
                 "-sid", args.subject_id[0], 
                 "--session_id", args.session_id[0], 
-                "--template", args.template[0],
-                "--segment", args.segment[0]
                 ]
 
     if args.testmode:
         command.append("--testmode")
+
+    # Handle segment
+    if args.segment:
+        segment_file_name = os.path.basename(args.segment[0])
+        volumes.append((args.segment[0], f"/temp/{segment_file_name}"))
+        command.extend(["--segment", f"/temp/{segment_file_name}"])
+
+    # Handle template
+    if args.template:
+        template_file_name = os.path.basename(args.template[0])
+        volumes.append((args.template[0], f"/temp/{template_file_name}"))
+        command.extend(["--template", f"/temp/{template_file_name}"])
 
     try:
         docker.run("jor115/t1proc",
@@ -142,7 +153,7 @@ def preprocess_T1w(args):
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
-                   volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
+                   volumes=volumes,
                    command=command
                    )
         return 0
@@ -156,16 +167,28 @@ def preprocess_T1w(args):
 
 
 def preprocess_rsfMRI(args):
+    volumes = [(args.parentDir[0], "/data"), (args.outDir[0], "/out")]
     command = ["-p", "/data", 
                 "-o", "/out",
                 "-sid", args.subject_id[0], 
                 "--session_id", args.session_id[0], 
-                "--template", args.template[0],
-                "--segment", args.segment[0]
                 ]
 
     if args.testmode:
         command.append("--testmode")
+
+    # Handle segment
+    if args.segment:
+        segment_file_name = os.path.basename(args.segment[0])
+        volumes.append((args.segment[0], f"/temp/{segment_file_name}"))
+        command.extend(["--segment", f"/temp/{segment_file_name}"])
+
+    # Handle template
+    if args.template:
+        template_file_name = os.path.basename(args.template[0])
+        volumes.append((args.template[0], f"/temp/{template_file_name}"))
+        command.extend(["--template", f"/temp/{template_file_name}"])
+
 
     try:
         docker.run("jor115/sfp",
@@ -174,7 +197,7 @@ def preprocess_rsfMRI(args):
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
-                   volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
+                   volumes=volumes,
                    command=command
                    )
         return 0
@@ -186,6 +209,19 @@ def preprocess_rsfMRI(args):
         return 1
 
 def preprocess_DTI(args):
+    volumes = [(args.parentDir[0], "/data"), 
+        (args.outDir[0], "/out"), 
+        (args.fslicense[0], "/opt/freesurfer/license.txt"),
+        ("./qgi_scalar_export.json", "/temp/qgi_scalar_export.json")]
+
+    command = ["/data", "/out", "participant",
+        "--participant_label", args.subject_id[0],
+        "--skip_bids_validation", 
+        "--recon_input", "/out/qsiprep",
+        "--recon_spec", "/temp/qgi_scalar_export.json",
+        "--fs-license-file", "/opt/freesurfer/license.txt",
+        "--output-resolution", "2"]
+
     try:
         docker.run("pennbbl/qsiprep:0.20.0", ## last version to package qsiprep and qsirecon together
                    # name="qsiprep_container",
@@ -194,14 +230,8 @@ def preprocess_DTI(args):
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
-                   volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out"), (args.fslicense[0], "/opt/freesurfer/license.txt"), ("./qgi_scalar_export.json", "/temp/qgi_scalar_export.json")],
-                   command=["/data", "/out", "participant",
-                            "--participant_label", args.subject_id[0],
-                            "--skip_bids_validation", 
-                            "--recon_input", "/out/qsiprep",
-                            "--recon_spec", "/temp/qgi_scalar_export.json",
-                            "--fs-license-file", "/opt/freesurfer/license.txt",
-                            "--output-resolution", "2"]
+                   volumes=volumes,
+                   command=command
                    )
 
         return 0
@@ -227,6 +257,11 @@ def preprocess(args):
 def itsforgingtime(args):
     try:
 
+        volumes = [(args.parentDir[0], "/data"), 
+                (args.outDir[0], "/out")
+
+                ]
+
         command = [
             "-p", "/data", 
             "-o", "/out",
@@ -237,7 +272,21 @@ def itsforgingtime(args):
         ]
         # Add featureFile if provided
         if args.featureFile:
-            command.extend(["--featureFile", args.featureFile[0]])
+            feature_file_name = os.path.basename(args.featureFile[0])
+            volumes.append((args.featureFile[0], f"/temp/{feature_file_name}"))
+            command.extend(["--featureFile", f"/temp/{feature_file_name}"])
+
+        # Handle segment
+        if args.segment:
+            segment_file_name = os.path.basename(args.segment[0])
+            volumes.append((args.segment[0], f"/temp/{segment_file_name}"))
+            command.extend(["--segment", f"/temp/{segment_file_name}"])
+
+        # Handle template
+        if args.template:
+            template_file_name = os.path.basename(args.template[0])
+            volumes.append((args.template[0], f"/temp/{template_file_name}"))
+            command.extend(["--template", f"/temp/{template_file_name}"])
 
         # Check and add the supersizeme flag if it is set
         if args.supersizeme:
@@ -256,7 +305,7 @@ def itsforgingtime(args):
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
-                   volumes=[(args.parentDir[0], "/data"), (args.outDir[0], "/out")],
+                   volumes=volumes,
                    command=command
 
                    )

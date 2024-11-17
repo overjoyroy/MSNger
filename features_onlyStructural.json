@@ -39,22 +39,6 @@
     "ad"
   ],
 
-  "vol_radb_diff_func":[
-    "Volume_mm3", 
-    "original_firstorder_Mean",
-    "original_firstorder_Variance",
-    "original_firstorder_Kurtosis",
-    "original_firstorder_Skewness",
-    "dti_fa",
-    "md",
-    "rd",
-    "ad",
-    "clustering_coefficient",
-    "node_betweeness", 
-    "eigenvector_centrality", 
-    "participation_coef"
-  ],
-
   
   "Radiomic_basic": [
     "original_firstorder_Mean",
@@ -89,14 +73,8 @@
     "md",
     "rd",
     "ad"
-  ],
-
-  "Functional": [
-    "clustering_coefficient",
-    "node_betweeness", 
-    "eigenvector_centrality", 
-    "participation_coef", 
   ]
+
   
 }
 
