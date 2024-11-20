@@ -16,6 +16,14 @@
     "ad"
   ],
 
+  "vol_func":[
+    "Volume_mm3", 
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ],
+
   "radb_diff":[
     "original_firstorder_Mean",
     "original_firstorder_Variance",
@@ -25,6 +33,28 @@
     "md",
     "rd",
     "ad"
+  ],
+
+  "radb_func":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ],
+
+  "Diff_func": [
+    "dti_fa",
+    "md",
+    "rd",
+    "ad",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
   ],
 
   "vol_radb_diff":[
@@ -37,6 +67,45 @@
     "md",
     "rd",
     "ad"
+  ],
+
+  "vol_diff_func":[
+    "Volume_mm3", 
+    "dti_fa",
+    "md",
+    "rd",
+    "ad",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ],
+
+  "vol_radb_func":[
+    "Volume_mm3", 
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ],
+
+    "radb_diff_func":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
   ],
 
   "vol_radb_diff_func":[
@@ -95,7 +164,7 @@
     "clustering_coefficient",
     "node_betweeness", 
     "eigenvector_centrality", 
-    "participation_coef", 
+    "participation_coef"
   ]
   
 }
