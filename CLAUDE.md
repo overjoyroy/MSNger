@@ -12,7 +12,6 @@ The pipeline has two phases:
 
 - `dockerCheat.py` — main CLI; orchestrates Docker containers for preprocessing and MSNForge
 - `MSNForge/msnforge.py` — MSN construction only; called inside the `jor115/msnforge` container
-- `runRad.py` — batch runner used for multi-site datasets (hard-coded site list)
 
 ## Docker images used
 

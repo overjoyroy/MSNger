@@ -134,16 +134,6 @@ outDir/
 
 ---
 
-## Batch Example (from `runRad.py`)
-
-```bash
-python3 runRad.py
-```
-
-This script iterates over multiple sites and runs MSNger with structural-only features across all similarity measures and feature sets.
-
----
-
 ## License
 
 See [LICENSE](LICENSE).

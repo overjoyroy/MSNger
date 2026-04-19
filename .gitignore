@@ -16,3 +16,6 @@ MSNForge/__pycache__
 # temporary helper function i'm using
 runRad.py
 
+# run logs
+run_log_*.txt
+
