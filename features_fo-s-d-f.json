@@ -1,0 +1,100 @@
+{
+
+  "Rad-fo": [
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness"
+  ],
+
+  "Rad-sh": [
+    "original_shape_VoxelVolume",
+    "original_shape_SurfaceArea",
+    "original_shape_Sphericity",
+    "original_shape_Maximum3DDiameter"
+  ],
+
+  "Diffusion": [
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  "Functional": [
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ], 
+
+  "Rad-fo_rad-sh": [
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "original_shape_VoxelVolume",
+    "original_shape_SurfaceArea",
+    "original_shape_Sphericity",
+    "original_shape_Maximum3DDiameter"
+  ],
+
+  "Rad-fo_diffusion":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  "Rad-sh_diffusion":[
+    "original_shape_VoxelVolume",
+    "original_shape_SurfaceArea",
+    "original_shape_Sphericity",
+    "original_shape_Maximum3DDiameter",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ],
+
+  "Rad-fo_rad-sh_diffusion":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "original_shape_VoxelVolume",
+    "original_shape_SurfaceArea",
+    "original_shape_Sphericity",
+    "original_shape_Maximum3DDiameter",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad"
+  ], 
+
+  "Rad-fo_rad-sh_diffusion_func":[
+    "original_firstorder_Mean",
+    "original_firstorder_Variance",
+    "original_firstorder_Kurtosis",
+    "original_firstorder_Skewness",
+    "original_shape_VoxelVolume",
+    "original_shape_SurfaceArea",
+    "original_shape_Sphericity",
+    "original_shape_Maximum3DDiameter",
+    "dti_fa",
+    "md",
+    "rd",
+    "ad",
+    "clustering_coefficient",
+    "node_betweeness", 
+    "eigenvector_centrality", 
+    "participation_coef"
+  ]
+
+  
+}
+

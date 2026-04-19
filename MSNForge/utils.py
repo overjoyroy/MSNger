@@ -35,4 +35,4 @@ def extract_modality_suffix(filename):
     if match:
         return match.group(1)
     else:
-        return None
+        raise ValueError(f"Could not extract modality suffix from filename: {filename}")

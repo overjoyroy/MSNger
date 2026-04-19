@@ -78,7 +78,7 @@ def registerAtlasToMap(args, outDir, diffusionMapPath):
 
     applyout = antsAppTrfm.run()
     regsiteredAtlas = applyout.outputs.output_image
-    print('The registered atlas was generated ans saved here:{}'.format(regsiteredAtlas))
+    print('The registered atlas was generated and saved here:{}'.format(regsiteredAtlas))
 
     print('Cleaning up intermediate products to save storage...')
     shutil.rmtree(tempDir)

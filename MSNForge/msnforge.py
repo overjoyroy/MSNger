@@ -122,7 +122,7 @@ def vet_inputs(args):
     elif not args.session_id :
         for i in os.listdir(os.path.join(args.parentDir[0], args.subject_id[0])):
             if 'ses-' in i:
-                ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
+                raise ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
 
     # configure the desired features for the MSN
     if args.features == 'custom':
@@ -504,10 +504,10 @@ def main():
     else:
         if args.supersizeme:
             for i in featureSet:
-                try: 
+                try:
                     miniMSNPipeline(args, outDir, consolidated_standardized_path, i, args.similarity_measure)
                 except Exception as e:
-                    errors.append(f"Error with feature '{i}' and similarity '{j}': {str(e)}")
+                    errors.append(f"Error with feature '{i}' and similarity '{args.similarity_measure}': {str(e)}")
         else:
             selected_feature = args.features if args.features != 'custom' else featureSet[0]
             try:

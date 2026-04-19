@@ -1,4 +1,5 @@
 import os
+import sys
 from python_on_whales import docker
 import argparse
 from tqdm import tqdm
@@ -96,10 +97,10 @@ def vet_inputs(args):
         # Validate session ID if provided
         if args.session_id and not isinstance(args.session_id[0], str):
             raise ValueError("Session ID is invalid. It should be in the form 'ses-#+' ")
-        else:
+        elif not args.session_id:
             for i in os.listdir(os.path.join(args.parentDir[0], args.subject_id[0])):
                 if 'ses-' in i:
-                    ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
+                    raise ValueError("Session ID is invalid. Your data seems to be organized by sessions but one was not provided.")
 
     # configure the desired features for the MSN
     if args.features == 'custom':
@@ -125,11 +126,12 @@ def printBar(length=64):
 def preprocess_T1w(args):
     volumes = [(args.parentDir[0], "/data"), (args.outDir[0], "/out")]
 
-    command = ["-p", "/data", 
+    command = ["-p", "/data",
                 "-o", "/out",
-                "-sid", args.subject_id[0], 
-                "--session_id", args.session_id[0], 
+                "-sid", args.subject_id[0],
                 ]
+    if args.session_id:
+        command.extend(["--session_id", args.session_id[0]])
 
     if args.testmode:
         command.append("--testmode")
@@ -149,7 +151,7 @@ def preprocess_T1w(args):
     try:
         docker.run("jor115/t1proc",
                    interactive=True,
-                   tty=True,
+                   tty=sys.stdout.isatty(),
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
@@ -168,11 +170,12 @@ def preprocess_T1w(args):
 
 def preprocess_rsfMRI(args):
     volumes = [(args.parentDir[0], "/data"), (args.outDir[0], "/out")]
-    command = ["-p", "/data", 
+    command = ["-p", "/data",
                 "-o", "/out",
-                "-sid", args.subject_id[0], 
-                "--session_id", args.session_id[0], 
+                "-sid", args.subject_id[0],
                 ]
+    if args.session_id:
+        command.extend(["--session_id", args.session_id[0]])
 
     if args.testmode:
         command.append("--testmode")
@@ -193,7 +196,7 @@ def preprocess_rsfMRI(args):
     try:
         docker.run("jor115/sfp",
                    interactive=True,
-                   tty=True,
+                   tty=sys.stdout.isatty(),
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
@@ -204,8 +207,9 @@ def preprocess_rsfMRI(args):
     except KeyboardInterrupt:
         print("Keyboard interrupt received. Stopping the container...")
         return 1
-    except:
+    except Exception as e:
         print("Error, patient BOLD couldn't be processed...")
+        print(e)
         return 1
 
 def preprocess_DTI(args):
@@ -226,7 +230,7 @@ def preprocess_DTI(args):
         docker.run("pennbbl/qsiprep:0.20.0", ## last version to package qsiprep and qsirecon together
                    # name="qsiprep_container",
                    interactive=True,
-                   tty=True,
+                   tty=sys.stdout.isatty(),
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
@@ -238,8 +242,9 @@ def preprocess_DTI(args):
     except KeyboardInterrupt:
         print("Keyboard interrupt received. Stopping the container...")
         return 1
-    except:
+    except Exception as e:
         print("Error, patient DWI couldn't be processed...")
+        print(e)
         return 1
 
 def preprocess(args):
@@ -263,13 +268,14 @@ def itsforgingtime(args):
                 ]
 
         command = [
-            "-p", "/data", 
+            "-p", "/data",
             "-o", "/out",
-            "-sid", args.subject_id[0], 
-            "--session_id", args.session_id[0],
-            "--features", args.features, 
+            "-sid", args.subject_id[0],
+            "--features", args.features,
             "--similarity_measure", args.similarity_measure
         ]
+        if args.session_id:
+            command.extend(["--session_id", args.session_id[0]])
         # Add featureFile if provided
         if args.featureFile:
             feature_file_name = os.path.basename(args.featureFile[0])
@@ -301,7 +307,7 @@ def itsforgingtime(args):
 
         docker.run("jor115/msnforge",
                    interactive=True,
-                   tty=True,
+                   tty=sys.stdout.isatty(),
                    remove=True,
                    user="{}:{}".format(os.getuid(), os.getgid()),
                    platform="linux/amd64",
@@ -379,7 +385,7 @@ def main():
             if not args.skipforge:
                 res = itsforgingtime(args)
                 if res!=0:
-                    processing_error.append(f"Preprocessing error: {json.dumps(vars(args), indent=2)}")
+                    processing_error.append(f"Forging error: {json.dumps(vars(args), indent=2)}")
             else:
                 print("Skipping forging...")
 
